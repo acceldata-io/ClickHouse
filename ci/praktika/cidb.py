@@ -35,19 +35,20 @@ class CIDB:
         test_duration_ms: Optional[int]
         test_context_raw: str
 
-    def __init__(self, url, passwd):
+    def __init__(self, url, user, passwd):
         self.url = url
         self.auth = {
-            "X-ClickHouse-User": "default",
+            "X-ClickHouse-User": user,
             "X-ClickHouse-Key": passwd,
         }
 
+    @classmethod
     def _get_sub_result_with_test_cases(cls, result: Result) -> Result:
         """
         Returns the sub-result with the most test cases.
         Assumes:
         - `result.results` is a list of sub-tasks one of them is a Test subtask with test cases to be exported to cidb.
-        - Returns the original `result` if no sub-results exist or sub-results are test cases themselves (result depth=1).
+        - Returns the original `result` if no sub-results exist or result contains test cases themselves (result depth=0,1).
         """
         max_test_cases = 0
         index_with_max_test_cases = -1
@@ -92,11 +93,7 @@ class CIDB:
             test_context_raw=result.info,
         )
         yield json.dumps(dataclasses.asdict(base_record))
-        for result_ in result.results:
-            while result_.results and result_.results[0].results:
-                # it's up to a job hoe it's Result is formed. It can be multiple layers of nesting.
-                #  Go into final layer, assuming this is where test cases are located
-                result_ = result_.results
+        for result_ in cls._get_sub_result_with_test_cases(result).results:
             record = copy.deepcopy(base_record)
             record.test_name = result_.name
             if result_.start_time:
