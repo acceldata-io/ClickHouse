@@ -29,6 +29,12 @@ SET automatic_parallel_replicas_mode = 0;
 -- reading, so the timeout fires reliably regardless of how fast the hardware is. The work is spread across replicas,
 -- so each leaf accumulates several seconds of sleep, far exceeding the one second timeout.
 
+-- 'max_threads = 1' makes each replica sleep serially. With a higher (default or randomized) 'max_threads',
+-- the sleeps run in parallel reading streams and the query can finish before the one second timeout fires:
+-- 1000 rows * 0.01 s over 3 replicas leaves only ~1.1 s of wall-clock time per replica already with 3 threads,
+-- and far less on machines with more cores.
+SET max_threads = 1;
+
 -- The whole-query timeout 'max_execution_time' aborts the query.
 SELECT sum(sleepEachRow(0.01)) FROM test_max_execution_time_leaf SETTINGS max_block_size = 1, max_execution_time = 1; -- { serverError TIMEOUT_EXCEEDED }
 -- The leaf timeout 'max_execution_time_leaf' aborts the per-replica (leaf) execution.
@@ -37,4 +43,20 @@ SELECT sum(sleepEachRow(0.01)) FROM test_max_execution_time_leaf SETTINGS max_bl
 SELECT sum(sleepEachRow(0.01)) FROM test_max_execution_time_leaf FORMAT Null SETTINGS max_block_size = 1, max_execution_time = 1, timeout_overflow_mode = 'break';
 SELECT sum(sleepEachRow(0.01)) FROM test_max_execution_time_leaf FORMAT Null SETTINGS max_block_size = 1, max_execution_time_leaf = 1, timeout_overflow_mode_leaf = 'break';
 
+-- The leaf timeout is also effective for INSERT SELECT executed with parallel replicas. The local-pipeline
+-- settings ('parallel_replicas_local_plan', 'parallel_replicas_insert_select_local_pipeline',
+-- 'parallel_replicas_prefer_local_replica') are intentionally left at their defaults (1): when
+-- 'max_execution_time_leaf' is set, the local insert select pipeline is skipped (it shares the initiator's
+-- query status and cannot be bounded by the leaf timeout), so all leaf reading is bounded.
+DROP TABLE IF EXISTS test_max_execution_time_leaf_insert SYNC;
+CREATE TABLE test_max_execution_time_leaf_insert
+(
+    key UInt64
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/{database}/test_max_execution_time_leaf_insert', 'r1')
+ORDER BY key;
+
+INSERT INTO test_max_execution_time_leaf_insert SELECT key + sleepEachRow(0.01) FROM test_max_execution_time_leaf SETTINGS parallel_distributed_insert_select = 2, max_block_size = 1, max_execution_time_leaf = 1; -- { serverError TIMEOUT_EXCEEDED }
+
+DROP TABLE test_max_execution_time_leaf_insert SYNC;
 DROP TABLE test_max_execution_time_leaf SYNC;
