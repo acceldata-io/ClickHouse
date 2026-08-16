@@ -35,6 +35,7 @@
 #include <Processors/Transforms/DeduplicationTokenTransforms.h>
 #include <Processors/Transforms/PlanSquashingTransform.h>
 #include <Processors/Transforms/ApplySquashingTransform.h>
+#include <Processors/Transforms/ShrinkColumnsTransform.h>
 #include <Processors/ResizeProcessor.h>
 #include <Processors/Transforms/getSourceFromASTInsertQuery.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
@@ -85,6 +86,8 @@ namespace Setting
     extern const SettingsNonZeroUInt64 max_block_size;
     extern const SettingsUInt64 preferred_block_size_bytes;
     extern const SettingsUInt64 min_insert_block_size_bytes;
+    extern const SettingsFloat shrink_over_allocated_columns_min_waste_ratio;
+    extern const SettingsUInt64 shrink_over_allocated_columns_min_waste_bytes;
     extern const SettingsString insert_deduplication_token;
     extern const SettingsBool use_concurrency_control;
     extern const SettingsSeconds lock_acquire_timeout;
@@ -743,17 +746,16 @@ std::optional<QueryPipeline> InterpreterInsertQuery::buildInsertSelectPipelinePa
         /// The local pipeline executes inside the initiator's pipeline and shares the initiator's 'QueryStatus',
         /// so it cannot be bounded by 'max_execution_time_leaf' (the leaf timeout is substituted into
         /// 'max_execution_time' only for remote replicas, which build their own 'QueryStatus' from the shipped
-        /// settings). To make the leaf timeout effective when it is stricter than the initiator's own
-        /// 'max_execution_time' (which does bound the local pipeline), skip the local pipeline so that all leaf
-        /// reading happens on remote replicas — the same approach as for SELECT in
+        /// settings). Skip the local pipeline when the leaf timeout contract differs from the initiator's timeout
+        /// contract so that all leaf reading happens on remote replicas — the same approach as for SELECT in
         /// 'updateContextForParallelReplicas'.
         if (ClusterProxy::leafTimeoutRequiresRemoteOnlyLeafReading(settings))
         {
             LOG_TRACE(
                 logger,
-                "Not using the local insert select pipeline because 'max_execution_time_leaf' is stricter than "
-                "'max_execution_time': the local "
-                "pipeline shares the initiator's query status and cannot be bounded by the leaf timeout separately");
+                "Not using the local insert select pipeline because the leaf timeout contract differs from the "
+                "initiator's: the local pipeline shares the initiator's query status and cannot use the leaf "
+                "timeout separately");
         }
         else
         {
@@ -959,6 +961,14 @@ QueryPipeline InterpreterInsertQuery::buildInsertPipeline(ASTInsertQuery & query
         head_output = &processor->getOutputs().front();
         processors->emplace_back(std::move(processor));
     };
+
+    /// Shrink over-allocated columns produced by parsing (e.g. String columns grown power-of-two) to
+    /// fit, right after the source where the chunk is uniquely owned, to reduce peak memory usage.
+    if (static_cast<double>(settings[Setting::shrink_over_allocated_columns_min_waste_ratio]) > 1.0)
+        add_head_transform(std::make_shared<ShrinkColumnsTransform>(
+            insert_header,
+            static_cast<double>(settings[Setting::shrink_over_allocated_columns_min_waste_ratio]),
+            settings[Setting::shrink_over_allocated_columns_min_waste_bytes]));
 
     {
         auto counting = std::make_shared<CountingTransform>(insert_header, context->getQuota(), context->getNormalizedQueryHash());
@@ -1305,6 +1315,16 @@ BlockIO InterpreterInsertQuery::execute()
     }
 
     res.pipeline.addStorageHolder(table);
+
+    /// Keep the share lock until the pipeline finishes (not just while it is being built), so that
+    /// the dependent-view discovery and the commit of the inserted data are indivisible with respect
+    /// to an exclusive lock on the table. The atomic `CREATE MATERIALIZED VIEW ... POPULATE` relies
+    /// on this: under its brief exclusive lock on the source, any concurrent `INSERT` has either
+    /// already committed (and is covered by the pinned snapshot) or has not yet discovered the
+    /// dependent views (and will see the newly registered view).
+    QueryPlanResourceHolder insert_resources;
+    insert_resources.table_locks.emplace_back(std::move(table_lock));
+    res.pipeline.addResources(std::move(insert_resources));
 
     if (const auto * mv = dynamic_cast<const StorageMaterializedView *>(table.get()))
         res.pipeline.addStorageHolder(mv->getTargetTable());
