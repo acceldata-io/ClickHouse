@@ -9,6 +9,7 @@
 #include <Access/EnabledRolesInfo.h>
 #include <Access/EnabledSettings.h>
 #include <Access/SettingsProfilesInfo.h>
+#include <Access/RangerClient.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/Context.h>
 #include <Common/Exception.h>
@@ -84,6 +85,33 @@ namespace
 
     template <typename... OtherArgs>
     std::string_view getTableEngine(std::string_view arg1, const OtherArgs &...) { return arg1; }
+
+    /// Get table name from args
+    std::string_view getTable() { return {}; }
+
+    template <typename... OtherArgs>
+    std::string_view getTable(std::string_view, std::string_view arg2, const OtherArgs &...) { return arg2; }
+
+    /// Get column name from args (for single column)
+    std::string_view getColumn() { return {}; }
+
+    template <typename... OtherArgs>
+    std::string_view getColumn(std::string_view, std::string_view, std::string_view arg3, const OtherArgs &...) { return arg3; }
+
+    /// Check access via Ranger (single privilege, single column)
+    bool checkRangerSingle(
+        RangerClient * ranger_client,
+        const String & user_name,
+        const String & privilege,
+        const String & database,
+        const String & table,
+        const String & column)
+    {
+        if (!ranger_client || !ranger_client->isReady())
+            return false;
+
+        return ranger_client->checkAccess(user_name, privilege, database, table, column, nullptr);
+    }
 }
 
 
@@ -635,19 +663,70 @@ bool ContextAccess::checkAccessImplHelper(const ContextPtr & context, AccessFlag
 
     auto acs = getAccessRightsWithImplicit();
     bool granted;
-    if constexpr (wildcard)
+
+    // Ranger integration: replace native grant check with Ranger call
+    // grant_option checks NEVER go to Ranger (they manage native grants)
+    if (access_control->isRangerEnabled() && !grant_option)
     {
-        if constexpr (grant_option)
-            granted = acs->hasGrantOptionWildcard(flags, args...);
+        auto * ranger_client = access_control->getRangerClient();
+        if (ranger_client && ranger_client->isReady())
+        {
+            // Get user name
+            String user_name = getUserName();
+
+            // Get database, table, column
+            std::string_view database = getDatabase(args...);
+            std::string_view table = getTable(args...);
+            std::string_view column = getColumn(args...);
+
+            String db_str(database);
+            String table_str(table);
+            String column_str(column);
+
+            // Get leaf privileges
+            auto keywords = flags.toKeywords();
+
+            // Check each privilege with Ranger
+            granted = true;
+            for (const auto & privilege : keywords)
+            {
+                String privilege_str(privilege);
+
+                if (!checkRangerSingle(ranger_client, user_name, privilege_str,
+                                      db_str, table_str, column_str))
+                {
+                    granted = false;
+                    LOG_TRACE(getLogger("ContextAccess"),
+                        "Ranger denied: user={}, privilege={}, db={}, table={}, column={}",
+                        user_name, privilege_str, db_str, table_str, column_str);
+                    break;
+                }
+            }
+        }
         else
-            granted = acs->isGrantedWildcard(flags, args...);
+        {
+            // Ranger not ready => deny (fail-closed)
+            granted = false;
+            LOG_DEBUG(getLogger("ContextAccess"), "Ranger not ready, denying access");
+        }
     }
     else
     {
-        if constexpr (grant_option)
-            granted = acs->hasGrantOption(flags, args...);
+        // Native access check (Ranger disabled or grant_option check)
+        if constexpr (wildcard)
+        {
+            if constexpr (grant_option)
+                granted = acs->hasGrantOptionWildcard(flags, args...);
+            else
+                granted = acs->isGrantedWildcard(flags, args...);
+        }
         else
-            granted = acs->isGranted(flags, args...);
+        {
+            if constexpr (grant_option)
+                granted = acs->hasGrantOption(flags, args...);
+            else
+                granted = acs->isGranted(flags, args...);
+        }
     }
 
     if (!granted)

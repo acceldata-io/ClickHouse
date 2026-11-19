@@ -2540,6 +2540,22 @@ try
     {
         attachSystemTablesAsync(global_context, *DatabaseCatalog::instance().getSystemDatabase(), async_metrics);
 
+        // Start Ranger agent BEFORE opening any listening sockets
+        if (global_context->getAccessControl().isRangerEnabled())
+        {
+            LOG_INFO(log, "Starting Ranger agent...");
+            try
+            {
+                global_context->getAccessControl().startRangerAgent();
+                LOG_INFO(log, "Ranger agent is ready and ClickHouse authorization is now delegated to Ranger.");
+            }
+            catch (const Exception & e)
+            {
+                LOG_FATAL(log, "Failed to start Ranger agent: {}. ClickHouse cannot start without authorization.", e.message());
+                throw;
+            }
+        }
+
         {
             std::lock_guard lock(servers_lock);
             createServers(config(), listen_hosts, listen_try, server_pool, async_metrics, servers);

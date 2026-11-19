@@ -257,10 +257,17 @@ public:
     bool getAllowExperimentalTierSettings() const;
     bool getAllowBetaTierSettings() const;
 
+    /// Ranger integration
+    bool isRangerEnabled() const;
+    void startRangerAgent();  /// Start agent process, blocks until READY
+    class RangerClient * getRangerClient() const;
+
 private:
     class ContextAccessCache;
     class CustomSettingsPrefixes;
     class PasswordComplexityRules;
+    class RangerClient;
+    class RangerAgentSupervisor;
 
     bool insertImpl(const UUID & id, const AccessEntityPtr & entity, bool replace_if_exists, bool throw_if_exists, UUID * conflicting_id) override;
     bool removeImpl(const UUID & id, bool throw_if_not_exists) override;
@@ -289,6 +296,11 @@ private:
     std::atomic_bool allow_experimental_tier_settings = true;
     std::atomic_bool allow_beta_tier_settings = true;
     std::atomic_bool enable_user_name_access_type = true;
+
+    /// Ranger integration
+    std::atomic_bool ranger_enabled = false;
+    std::unique_ptr<RangerClient> ranger_client;
+    std::unique_ptr<RangerAgentSupervisor> ranger_supervisor;
 };
 
 }

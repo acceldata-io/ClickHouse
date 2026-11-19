@@ -18,6 +18,8 @@
 #include <Access/AccessChangesNotifier.h>
 #include <Access/AccessBackup.h>
 #include <Access/resolveSetting.h>
+#include <Access/RangerClient.h>
+#include <Access/RangerAgentSupervisor.h>
 #include <Backups/BackupEntriesCollector.h>
 #include <Backups/RestorerFromBackup.h>
 #include <Core/Settings.h>
@@ -41,6 +43,7 @@ namespace ErrorCodes
     extern const int REQUIRED_PASSWORD;
     extern const int CANNOT_COMPILE_REGEXP;
     extern const int BAD_ARGUMENTS;
+    extern const int LOGICAL_ERROR;
 }
 
 namespace
@@ -312,6 +315,38 @@ void AccessControl::setupFromMainConfig(const Poco::Util::AbstractConfiguration 
     addStoragesFromMainConfig(config_, config_path_, get_zookeeper_function_);
 
     role_cache = std::make_unique<RoleCache>(*this, config_.getInt("access_control_improvements.role_cache_expiration_time_seconds", 600));
+
+    /// Ranger integration setup (early spawn, wait late - done in startRangerAgent)
+    if (config_.getBool("ranger.enabled", false))
+    {
+        ranger_enabled.store(true, std::memory_order_release);
+
+        // Read Ranger configuration
+        RangerClient::Config client_config;
+        client_config.host = config_.getString("ranger.host", "127.0.0.1");
+        client_config.port = config_.getUInt("ranger.port", 9099);
+        client_config.connect_timeout_ms = config_.getUInt("ranger.connect_timeout_ms", 2000);
+        client_config.send_timeout_ms = config_.getUInt("ranger.send_timeout_ms", 2000);
+        client_config.receive_timeout_ms = config_.getUInt("ranger.receive_timeout_ms", 2000);
+
+        // Create RangerClient
+        ranger_client = std::make_unique<RangerClient>(client_config);
+
+        // Read agent configuration
+        RangerAgentSupervisor::Config supervisor_config;
+        supervisor_config.java_path = config_.getString("ranger.agent.java"); // Required
+        supervisor_config.jar_path = config_.getString("ranger.agent.jar");   // Required
+        supervisor_config.conf_dir = config_.getString("ranger.agent.conf_dir"); // Required
+        supervisor_config.jvm_opts = config_.getString("ranger.agent.jvm_opts", "");
+        supervisor_config.principal = config_.getString("ranger.agent.principal", "");
+        supervisor_config.keytab_path = config_.getString("ranger.agent.keytab", "");
+        supervisor_config.start_timeout_ms = config_.getUInt("ranger.agent.start_timeout_ms", 10000);
+
+        // Create supervisor (agent will be started later in startRangerAgent)
+        ranger_supervisor = std::make_unique<RangerAgentSupervisor>(supervisor_config, *ranger_client);
+
+        LOG_INFO(getLogger("AccessControl"), "Ranger integration configured (agent will be started before serving)");
+    }
 }
 
 
@@ -924,5 +959,27 @@ bool AccessControl::getAllowExperimentalTierSettings() const
 bool AccessControl::getAllowBetaTierSettings() const
 {
     return allow_beta_tier_settings;
+}
+
+bool AccessControl::isRangerEnabled() const
+{
+    return ranger_enabled.load(std::memory_order_acquire);
+}
+
+void AccessControl::startRangerAgent()
+{
+    if (!isRangerEnabled())
+        return;
+
+    if (!ranger_supervisor)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Ranger supervisor not initialized");
+
+    // Start agent and wait for READY (blocks until READY or timeout)
+    ranger_supervisor->start();
+}
+
+RangerClient * AccessControl::getRangerClient() const
+{
+    return ranger_client.get();
 }
 }
