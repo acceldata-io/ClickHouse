@@ -40,9 +40,14 @@ std::vector<String> RangerAgentSupervisor::buildCommandArgs() const
 {
     std::vector<String> args;
 
+    // First argument: script/jar file path
+    // For Python agent: /path/to/fake_ranger_agent.py
+    // For Java agent: /path/to/agent.jar (or -jar if in jvm_opts)
+    args.push_back(config.jar_path);
+
     // Parse jvm_opts (space-separated)
     // For fake Python agent: jvm_opts = "--supervised --behavior policy"
-    // For real Java agent: jvm_opts = "-Xmx512m -Dagent.port=0 -cp /path:jar Main --supervised"
+    // For real Java agent: jvm_opts = "-Xmx512m -jar -Dagent.port=0 --supervised"
     if (!config.jvm_opts.empty())
     {
         std::istringstream iss(config.jvm_opts);
@@ -52,9 +57,6 @@ std::vector<String> RangerAgentSupervisor::buildCommandArgs() const
             args.push_back(opt);
         }
     }
-
-    // NOTE: For Java agent, all args (including -Dagent.port, -cp, Main class, etc.)
-    // should be in jvm_opts. We don't add them here to support both Python and Java agents.
 
     return args;
 }
