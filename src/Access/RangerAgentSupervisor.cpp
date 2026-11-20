@@ -41,6 +41,8 @@ std::vector<String> RangerAgentSupervisor::buildCommandArgs() const
     std::vector<String> args;
 
     // Parse jvm_opts (space-separated)
+    // For fake Python agent: jvm_opts = "--supervised --behavior policy"
+    // For real Java agent: jvm_opts = "-Xmx512m -Dagent.port=0 -cp /path:jar Main --supervised"
     if (!config.jvm_opts.empty())
     {
         std::istringstream iss(config.jvm_opts);
@@ -51,28 +53,8 @@ std::vector<String> RangerAgentSupervisor::buildCommandArgs() const
         }
     }
 
-    // -Dagent.port=0 (dynamic port allocation)
-    args.push_back("-Dagent.port=0");
-
-    // Kerberos principal and keytab (if provided)
-    if (!config.principal.empty())
-    {
-        args.push_back("-Dagent.principal=" + config.principal);
-    }
-    if (!config.keytab_path.empty())
-    {
-        args.push_back("-Dagent.keytab=" + config.keytab_path);
-    }
-
-    // Classpath: conf_dir:jar_path
-    args.push_back("-cp");
-    args.push_back(config.conf_dir + ":" + config.jar_path);
-
-    // Main class
-    args.push_back("com.acceldata.clickhouse.ranger.AgentMain");
-
-    // --supervised flag (daemon mode, exit on stdin EOF)
-    args.push_back("--supervised");
+    // NOTE: For Java agent, all args (including -Dagent.port, -cp, Main class, etc.)
+    // should be in jvm_opts. We don't add them here to support both Python and Java agents.
 
     return args;
 }
@@ -328,15 +310,17 @@ void RangerAgentSupervisor::start()
 void RangerAgentSupervisor::stop()
 {
     bool was_running = running.exchange(false, std::memory_order_acq_rel);
-    if (!was_running)
+
+    // Set shutting_down even if not running (for drain threads during startup failure)
+    shutting_down.store(true, std::memory_order_release);
+
+    if (!was_running && !stdout_drain_thread.joinable() && !stderr_drain_thread.joinable())
     {
+        // Nothing started, nothing to clean up
         return;
     }
 
     LOG_INFO(getLogger("RangerAgentSupervisor"), "Stopping Ranger agent...");
-
-    // Set shutting_down flag so watcher doesn't _exit(100)
-    shutting_down.store(true, std::memory_order_release);
 
     // Close stdin pipe => agent sees EOF and exits
     // This will cause drain threads to receive EOF once process exits
