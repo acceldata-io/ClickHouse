@@ -691,40 +691,64 @@ bool ContextAccess::checkAccessImplHelper(const ContextPtr & context, AccessFlag
             // Get current user (avoid shadow warning)
             String current_user = getUserName();
 
-            // Extract database, table, column from args
-            std::string_view database = getDatabase(args...);
-            std::string_view table = getTable(args...);
-            std::string_view column = getColumn(args...);  // MVP: first column only for vector
-
-            String db_str(database);
-            String table_str(table);
-            String column_str(column);
-
-            // TODO: When args contains vector<columns>, loop through all columns
-            // Currently only first column is checked (MVP limitation)
+            // Build AccessRightsElement to extract database, table, columns
+            AccessRightsElement element(flags, args...);
+            String db_str(element.database);
+            String table_str(element.table);
 
             // Get leaf privileges
             auto keywords = flags.toKeywords();
 
             // Check each privilege with Ranger
             granted = true;
-            for (const auto & privilege : keywords)
+
+            // If no columns specified, check at table level
+            if (element.columns.empty())
             {
-                String privilege_str(privilege);
-
-                // Log the exact request for debugging
-                LOG_TRACE(::getLogger("ContextAccess"),
-                    "Ranger check: user={}, privilege={}, db={}, table={}, column={}",
-                    current_user, privilege_str, db_str, table_str, column_str);
-
-                if (!checkRangerSingle(ranger_client, current_user, privilege_str,
-                                      db_str, table_str, column_str))
+                for (const auto & privilege : keywords)
                 {
-                    granted = false;
-                    LOG_TRACE(::getLogger("ContextAccess"),
-                        "Ranger denied: user={}, privilege={}, db={}, table={}, column={}",
-                        current_user, privilege_str, db_str, table_str, column_str);
-                    break;
+                    String privilege_str(privilege);
+
+                    LOG_DEBUG(::getLogger("ContextAccess"),
+                        "Ranger check: user={}, privilege={}, db={}, table={}, column=",
+                        current_user, privilege_str, db_str, table_str);
+
+                    if (!checkRangerSingle(ranger_client, current_user, privilege_str,
+                                          db_str, table_str, ""))
+                    {
+                        granted = false;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                // Check each (privilege × column) combination
+                for (const auto & privilege : keywords)
+                {
+                    String privilege_str(privilege);
+
+                    for (const auto & column : element.columns)
+                    {
+                        String column_str(column);
+
+                        LOG_DEBUG(::getLogger("ContextAccess"),
+                            "Ranger check: user={}, privilege={}, db={}, table={}, column={}",
+                            current_user, privilege_str, db_str, table_str, column_str);
+
+                        if (!checkRangerSingle(ranger_client, current_user, privilege_str,
+                                              db_str, table_str, column_str))
+                        {
+                            granted = false;
+                            LOG_DEBUG(::getLogger("ContextAccess"),
+                                "Ranger DENY: user={}, privilege={}, db={}, table={}, column={}",
+                                current_user, privilege_str, db_str, table_str, column_str);
+                            break;
+                        }
+                    }
+
+                    if (!granted)
+                        break;  // Stop checking other privileges if one column denied
                 }
             }
         }
