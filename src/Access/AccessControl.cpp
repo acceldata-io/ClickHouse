@@ -345,7 +345,7 @@ void AccessControl::setupFromMainConfig(const Poco::Util::AbstractConfiguration 
         // Create supervisor (agent will be started later in startRangerAgent)
         ranger_supervisor = std::make_unique<RangerAgentSupervisor>(supervisor_config, *ranger_client);
 
-        LOG_INFO(getLogger("AccessControl"), "Ranger integration configured (agent will be started before serving)");
+        LOG_INFO(::getLogger("AccessControl"), "Ranger integration configured (agent will be started before serving)");
     }
 }
 

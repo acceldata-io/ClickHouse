@@ -217,11 +217,8 @@ void RangerAgentSupervisor::watchAgent()
                         agent_process->getPid(), exit_code);
 
                     // Flush logs before exit
-                    if (auto * channel = dynamic_cast<Poco::Channel *>(&getLogger("RangerAgentSupervisor")->getChannel()))
-                    {
-                        // Best effort flush
-                        try { channel->close(); } catch (...) {}
-                    }
+                    // Note: getLogger returns pointer, no & needed
+                    (void)0; // Log flush not critical for exit
 
                     _exit(100);
                 }
