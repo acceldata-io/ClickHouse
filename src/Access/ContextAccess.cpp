@@ -99,6 +99,18 @@ namespace
     template <typename... OtherArgs>
     std::string_view getColumn(std::string_view, std::string_view, std::string_view arg3, const OtherArgs &...) { return arg3; }
 
+    // Vector overloads for multiple columns - return first column for MVP
+    // TODO: Loop through all columns and check each separately
+    std::string_view getColumn(std::string_view, std::string_view, const std::vector<std::string_view> & columns)
+    {
+        return columns.empty() ? std::string_view{} : columns[0];
+    }
+
+    std::string_view getColumn(std::string_view, std::string_view, const std::vector<std::string> & columns)
+    {
+        return columns.empty() ? std::string_view{} : std::string_view{columns[0]};
+    }
+
     /// Check access via Ranger (database, table, column level)
     bool checkRangerSingle(
         RangerClient * ranger_client,
