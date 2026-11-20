@@ -681,9 +681,13 @@ bool ContextAccess::checkAccessImplHelper(const ContextPtr & context, AccessFlag
     // grant_option checks NEVER go to Ranger (they manage native grants)
     if (access_control->isRangerEnabled() && !grant_option)
     {
+        LOG_DEBUG(::getLogger("ContextAccess"), "Ranger enabled, checking authorization");
+
         auto * ranger_client = access_control->getRangerClient();
         if (ranger_client && ranger_client->isReady())
         {
+            LOG_DEBUG(::getLogger("ContextAccess"), "Ranger client ready, performing check");
+
             // Get current user (avoid shadow warning)
             String current_user = getUserName();
 
@@ -734,6 +738,10 @@ bool ContextAccess::checkAccessImplHelper(const ContextPtr & context, AccessFlag
     else
     {
         // Native access check (Ranger disabled or grant_option check)
+        LOG_DEBUG(::getLogger("ContextAccess"),
+            "Using native access check (Ranger enabled={}, grant_option={})",
+            access_control->isRangerEnabled(), grant_option);
+
         if constexpr (wildcard)
         {
             if constexpr (grant_option)
