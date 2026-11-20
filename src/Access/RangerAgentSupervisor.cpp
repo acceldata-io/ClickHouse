@@ -237,6 +237,13 @@ UInt16 RangerAgentSupervisor::waitForReady()
         if (agent_process->waitIfProccesTerminated())
         {
             int exit_code = agent_process->tryWait();
+            child_reaped.store(true, std::memory_order_release);  // Mark as reaped
+
+            // Close pipes so drain threads see EOF and can finish
+            try {
+                agent_process->in.close();
+            } catch (...) {}
+
             throw Exception(ErrorCodes::CANNOT_CREATE_CHILD_PROCESS,
                 "Ranger agent exited before sending READY, exit code: {}", exit_code);
         }
@@ -267,8 +274,9 @@ void RangerAgentSupervisor::watchAgent()
             // Check if agent terminated
             if (agent_process->waitIfProccesTerminated())
             {
-                // Agent exited
+                // Agent exited - reap it
                 int exit_code = agent_process->tryWait();
+                child_reaped.store(true, std::memory_order_release);
 
                 if (shutting_down.load(std::memory_order_acquire))
                 {
@@ -406,71 +414,90 @@ void RangerAgentSupervisor::stop()
 
     LOG_INFO(getLogger("RangerAgentSupervisor"), "Stopping Ranger agent...");
 
-    // Close stdin pipe => agent sees EOF and exits
-    // This will cause drain threads to receive EOF once process exits
+    // Wrap agent killing/waiting in try-catch to ensure joins always happen
     if (agent_process)
     {
         try
         {
-            agent_process->in.close();
-        }
-        catch (const Exception & e)
-        {
-            LOG_WARNING(getLogger("RangerAgentSupervisor"),
-                "Error closing agent stdin: {}", e.message());
-        }
-
-        // Wait for agent to exit (with timeout)
-        bool exited = false;
-        for (int i = 0; i < 50; ++i) // 5 seconds total
-        {
-            if (agent_process->waitIfProccesTerminated())
+            // Close stdin pipe => agent sees EOF and exits
+            try
             {
-                exited = true;
-                break;
+                agent_process->in.close();
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-
-        if (!exited)
-        {
-            LOG_WARNING(getLogger("RangerAgentSupervisor"),
-                "Ranger agent did not exit after stdin close, sending SIGTERM");
-            kill(agent_process->getPid(), SIGTERM);
-
-            // Wait another 2 seconds
-            for (int i = 0; i < 20; ++i)
+            catch (const Exception & e)
             {
-                if (agent_process->waitIfProccesTerminated())
+                LOG_WARNING(getLogger("RangerAgentSupervisor"),
+                    "Error closing agent stdin: {}", e.message());
+            }
+
+            // If child already reaped (by waitForReady or watcher), skip wait
+            if (!child_reaped.load(std::memory_order_acquire))
+            {
+                // Wait for agent to exit (with timeout)
+                bool exited = false;
+                for (int i = 0; i < 50; ++i) // 5 seconds total
                 {
-                    exited = true;
-                    break;
+                    if (agent_process->waitIfProccesTerminated())
+                    {
+                        exited = true;
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 }
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+                if (!exited)
+                {
+                    LOG_WARNING(getLogger("RangerAgentSupervisor"),
+                        "Ranger agent did not exit after stdin close, sending SIGTERM");
+                    kill(agent_process->getPid(), SIGTERM);
+
+                    // Wait another 2 seconds
+                    for (int i = 0; i < 20; ++i)
+                    {
+                        if (agent_process->waitIfProccesTerminated())
+                        {
+                            exited = true;
+                            break;
+                        }
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    }
+                }
+
+                if (!exited)
+                {
+                    LOG_WARNING(getLogger("RangerAgentSupervisor"),
+                        "Ranger agent did not exit gracefully, sending SIGKILL");
+                    kill(agent_process->getPid(), SIGKILL);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    agent_process->waitIfProccesTerminated();
+                }
+
+                // Try to get exit code
+                try
+                {
+                    int exit_code = agent_process->tryWait();
+                    child_reaped.store(true, std::memory_order_release);
+                    LOG_INFO(getLogger("RangerAgentSupervisor"),
+                        "Ranger agent exited with code {}", exit_code);
+                }
+                catch (const Exception & e)
+                {
+                    // ECHILD means watcher already reaped - this is fine
+                    LOG_DEBUG(getLogger("RangerAgentSupervisor"),
+                        "Agent exit code unavailable (already reaped): {}", e.message());
+                }
+            }
+            else
+            {
+                LOG_DEBUG(getLogger("RangerAgentSupervisor"),
+                    "Agent already reaped, skipping wait");
             }
         }
-
-        if (!exited)
+        catch (const std::exception & e)
         {
             LOG_WARNING(getLogger("RangerAgentSupervisor"),
-                "Ranger agent did not exit gracefully, sending SIGKILL");
-            kill(agent_process->getPid(), SIGKILL);
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-            agent_process->waitIfProccesTerminated();
-        }
-
-        // Try to get exit code, but watcher may have already reaped the child
-        try
-        {
-            int exit_code = agent_process->tryWait();
-            LOG_INFO(getLogger("RangerAgentSupervisor"),
-                "Ranger agent exited with code {}", exit_code);
-        }
-        catch (const Exception & e)
-        {
-            // ECHILD means watcher already reaped - this is fine
-            LOG_DEBUG(getLogger("RangerAgentSupervisor"),
-                "Agent exit code unavailable (already reaped): {}", e.message());
+                "Exception during agent shutdown: {}", e.what());
+            // Continue to join threads
         }
     }
 

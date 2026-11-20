@@ -56,6 +56,7 @@ private:
     std::atomic<UInt16> port{0};
     std::atomic<bool> running{false};
     std::atomic<bool> shutting_down{false};
+    std::atomic<bool> child_reaped{false};  // Track if waitpid already called
 
     std::thread watcher_thread;
     std::thread stdout_drain_thread;

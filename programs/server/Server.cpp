@@ -2552,7 +2552,9 @@ try
             catch (const Exception & e)
             {
                 LOG_FATAL(log, "Failed to start Ranger agent: {}. ClickHouse cannot start without authorization.", e.message());
-                throw;
+                // Exit with code 100 (fail-stop, no authorization)
+                // Do not throw - that would trigger abort in destructor
+                exit(100);
             }
         }
 
