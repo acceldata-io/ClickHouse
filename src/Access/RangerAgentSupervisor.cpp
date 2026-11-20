@@ -48,6 +48,7 @@ std::vector<String> RangerAgentSupervisor::buildCommandArgs() const
     // Parse jvm_opts (space-separated)
     // For fake Python agent: jvm_opts = "--supervised --behavior policy"
     // For real Java agent: jvm_opts = "-Xmx512m -jar -Dagent.port=0 --supervised"
+    bool has_supervised = false;
     if (!config.jvm_opts.empty())
     {
         std::istringstream iss(config.jvm_opts);
@@ -55,7 +56,17 @@ std::vector<String> RangerAgentSupervisor::buildCommandArgs() const
         while (iss >> opt)
         {
             args.push_back(opt);
+            if (opt == "--supervised")
+            {
+                has_supervised = true;
+            }
         }
+    }
+
+    // Always ensure --supervised is present for fail-stop behavior
+    if (!has_supervised)
+    {
+        args.push_back("--supervised");
     }
 
     return args;
@@ -340,8 +351,8 @@ void RangerAgentSupervisor::start()
     // Wait for READY (with timeout)
     UInt16 agent_port = waitForReady();
 
-    // Mark as ready in RangerClient
-    client.setReady();
+    // Mark as ready in RangerClient with the actual port
+    client.setReady(agent_port);
 
     LOG_INFO(getLogger("RangerAgentSupervisor"),
         "Ranger agent is ready on port {}", agent_port);

@@ -48,8 +48,13 @@ public:
     /// Before READY, all checkAccess() calls return false (deny).
     bool isReady() const { return ready.load(std::memory_order_acquire); }
 
-    /// Mark as ready (called by RangerAgentSupervisor after READY).
-    void setReady() { ready.store(true, std::memory_order_release); }
+    /// Mark as ready and set port (called by RangerAgentSupervisor after READY).
+    void setReady(UInt16 port_)
+    {
+        std::lock_guard lock(mutex);
+        config.port = port_;
+        ready.store(true, std::memory_order_release);
+    }
 
 private:
     Config config;

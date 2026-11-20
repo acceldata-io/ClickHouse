@@ -86,7 +86,20 @@ namespace
     template <typename... OtherArgs>
     std::string_view getTableEngine(std::string_view arg1, const OtherArgs &...) { return arg1; }
 
-    /// Check access via Ranger (MVP: database level only)
+    std::string_view getTable() { return {}; }
+    std::string_view getTable(std::string_view) { return {}; }
+
+    template <typename... OtherArgs>
+    std::string_view getTable(std::string_view, std::string_view arg2, const OtherArgs &...) { return arg2; }
+
+    std::string_view getColumn() { return {}; }
+    std::string_view getColumn(std::string_view) { return {}; }
+    std::string_view getColumn(std::string_view, std::string_view) { return {}; }
+
+    template <typename... OtherArgs>
+    std::string_view getColumn(std::string_view, std::string_view, std::string_view arg3, const OtherArgs &...) { return arg3; }
+
+    /// Check access via Ranger (database, table, column level)
     bool checkRangerSingle(
         RangerClient * ranger_client,
         const String & user_name,
@@ -662,11 +675,14 @@ bool ContextAccess::checkAccessImplHelper(const ContextPtr & context, AccessFlag
             // Get current user (avoid shadow warning)
             String current_user = getUserName();
 
-            // Get database (MVP: table/column empty for now)
+            // Extract database, table, column from args
             std::string_view database = getDatabase(args...);
+            std::string_view table = getTable(args...);
+            std::string_view column = getColumn(args...);
+
             String db_str(database);
-            String table_str;  // TODO: extract from args
-            String column_str; // TODO: extract from args
+            String table_str(table);
+            String column_str(column);
 
             // Get leaf privileges
             auto keywords = flags.toKeywords();
@@ -677,13 +693,18 @@ bool ContextAccess::checkAccessImplHelper(const ContextPtr & context, AccessFlag
             {
                 String privilege_str(privilege);
 
+                // Log the exact request for debugging
+                LOG_TRACE(::getLogger("ContextAccess"),
+                    "Ranger check: user={}, privilege={}, db={}, table={}, column={}",
+                    current_user, privilege_str, db_str, table_str, column_str);
+
                 if (!checkRangerSingle(ranger_client, current_user, privilege_str,
                                       db_str, table_str, column_str))
                 {
                     granted = false;
                     LOG_TRACE(::getLogger("ContextAccess"),
-                        "Ranger denied: user={}, privilege={}, db={}",
-                        current_user, privilege_str, db_str);
+                        "Ranger denied: user={}, privilege={}, db={}, table={}, column={}",
+                        current_user, privilege_str, db_str, table_str, column_str);
                     break;
                 }
             }

@@ -72,6 +72,7 @@ bool RangerClient::sendRequestImpl(const String & request, String & response_out
         writeString(request, out);
         writeChar('\n', out);
         out.next();
+        out.finalize();
 
         // Read response (one line)
         ReadBufferFromPocoSocket in(*socket);
@@ -97,6 +98,7 @@ bool RangerClient::sendRequestImpl(const String & request, String & response_out
                 writeString(request, out);
                 writeChar('\n', out);
                 out.next();
+                out.finalize();
 
                 ReadBufferFromPocoSocket in(*socket);
                 readString(response_out, in, '\n');
