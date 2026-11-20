@@ -75,6 +75,13 @@ void RangerAgentSupervisor::drainStdout()
 
             while (!out.eof())
             {
+                // Check if we need to read more data
+                if (out.position() >= out.buffer().end())
+                {
+                    if (!out.next())
+                        break;
+                }
+
                 char c = *out.position();
                 ++out.position();
 
@@ -151,6 +158,13 @@ void RangerAgentSupervisor::drainStderr()
 
             while (!err.eof())
             {
+                // Check if we need to read more data
+                if (err.position() >= err.buffer().end())
+                {
+                    if (!err.next())
+                        break;
+                }
+
                 char c = *err.position();
                 ++err.position();
 
@@ -222,6 +236,14 @@ void RangerAgentSupervisor::watchAgent()
 
         while (true)
         {
+            // Check if shutting down
+            if (shutting_down.load(std::memory_order_acquire))
+            {
+                LOG_INFO(getLogger("RangerAgentSupervisor"),
+                    "Agent watcher exiting due to shutdown");
+                break;
+            }
+
             std::this_thread::sleep_for(std::chrono::seconds(1));
 
             // Check if agent terminated
