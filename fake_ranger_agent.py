@@ -54,7 +54,9 @@ class FakeRangerAgent:
 
     def handle_request(self, line):
         """Process one request line and return response line."""
-        parts = line.strip().split('\t')
+        # Only strip newlines, not tabs (preserve empty fields)
+        line = line.rstrip('\r\n')
+        parts = line.split('\t')
 
         if not parts:
             return "DENY\tmalformed request\n"
@@ -65,14 +67,15 @@ class FakeRangerAgent:
             return "PONG\n"
 
         elif command == 'CHECK':
-            if len(parts) < 6:
-                return "DENY\tmissing fields\n"
+            # Pad missing fields to handle CHECK\tuser\tpriv\tdb\t\t (empty table/column)
+            while len(parts) < 6:
+                parts.append("")
 
             user = parts[1]
             privileges = parts[2]
             database = parts[3]
             table = parts[4]
-            column = parts[5] if len(parts) > 5 else ""
+            column = parts[5]
 
             # MVP: require database
             if not database:

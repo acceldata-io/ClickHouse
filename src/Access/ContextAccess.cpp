@@ -690,11 +690,14 @@ bool ContextAccess::checkAccessImplHelper(const ContextPtr & context, AccessFlag
             // Extract database, table, column from args
             std::string_view database = getDatabase(args...);
             std::string_view table = getTable(args...);
-            std::string_view column = getColumn(args...);
+            std::string_view column = getColumn(args...);  // MVP: first column only for vector
 
             String db_str(database);
             String table_str(table);
             String column_str(column);
+
+            // TODO: When args contains vector<columns>, loop through all columns
+            // Currently only first column is checked (MVP limitation)
 
             // Get leaf privileges
             auto keywords = flags.toKeywords();

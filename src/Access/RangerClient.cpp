@@ -78,8 +78,8 @@ bool RangerClient::sendRequestImpl(const String & request, String & response_out
         ReadBufferFromPocoSocket in(*socket);
         readString(response_out, in, '\n');
 
-        // Remove trailing newline if present
-        if (!response_out.empty() && response_out.back() == '\n')
+        // Trim trailing whitespace (\r\n or \n)
+        while (!response_out.empty() && (response_out.back() == '\n' || response_out.back() == '\r'))
             response_out.pop_back();
 
         return true;
@@ -103,7 +103,8 @@ bool RangerClient::sendRequestImpl(const String & request, String & response_out
                 ReadBufferFromPocoSocket in(*socket);
                 readString(response_out, in, '\n');
 
-                if (!response_out.empty() && response_out.back() == '\n')
+                // Trim trailing whitespace (\r\n or \n)
+                while (!response_out.empty() && (response_out.back() == '\n' || response_out.back() == '\r'))
                     response_out.pop_back();
 
                 return true;
