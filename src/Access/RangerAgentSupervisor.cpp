@@ -70,12 +70,19 @@ void RangerAgentSupervisor::drainStdout()
 
         while (!out.eof())
         {
-            readString(line, out, '\n');
+            // Read char by char to handle pipe buffering correctly
+            line.clear();
 
-            // Trim trailing whitespace
-            while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back())))
+            while (!out.eof())
             {
-                line.pop_back();
+                char c = *out.position();
+                ++out.position();
+
+                if (c == '\n')
+                {
+                    break;
+                }
+                line += c;
             }
 
             if (line.empty())
@@ -139,7 +146,20 @@ void RangerAgentSupervisor::drainStderr()
 
         while (!err.eof())
         {
-            readString(line, err, '\n');
+            // Read char by char to handle pipe buffering correctly
+            line.clear();
+
+            while (!err.eof())
+            {
+                char c = *err.position();
+                ++err.position();
+
+                if (c == '\n')
+                {
+                    break;
+                }
+                line += c;
+            }
 
             if (!line.empty())
             {
