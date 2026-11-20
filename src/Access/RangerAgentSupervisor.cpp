@@ -26,7 +26,14 @@ RangerAgentSupervisor::RangerAgentSupervisor(const Config & config_, RangerClien
 
 RangerAgentSupervisor::~RangerAgentSupervisor()
 {
-    stop();
+    try
+    {
+        stop();
+    }
+    catch (...)
+    {
+        // Swallow exceptions in destructor
+    }
 }
 
 std::vector<String> RangerAgentSupervisor::buildCommandArgs() const
@@ -81,6 +88,20 @@ void RangerAgentSupervisor::drainStdout()
         {
             readString(line, out, '\n');
 
+            // Trim trailing whitespace
+            while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back())))
+            {
+                line.pop_back();
+            }
+
+            if (line.empty())
+            {
+                continue;
+            }
+
+            LOG_TRACE(getLogger("RangerAgentSupervisor"),
+                "Agent stdout line: '{}'", line);
+
             if (line.starts_with("READY ipc="))
             {
                 // Parse "READY ipc=127.0.0.1:<port>"
@@ -102,12 +123,17 @@ void RangerAgentSupervisor::drainStdout()
                         catch (...)
                         {
                             LOG_WARNING(getLogger("RangerAgentSupervisor"),
-                                "Failed to parse port from READY line: {}", line);
+                                "Failed to parse port from READY line: '{}'", line);
                         }
+                    }
+                    else
+                    {
+                        LOG_WARNING(getLogger("RangerAgentSupervisor"),
+                            "READY line missing colon: '{}'", line);
                     }
                 }
             }
-            else if (!line.empty())
+            else
             {
                 // Forward other lines to log (may include Kerberos login messages)
                 LOG_INFO(getLogger("RangerAgentSupervisor"), "[Ranger Agent stdout] {}", line);
@@ -301,7 +327,8 @@ void RangerAgentSupervisor::start()
 
 void RangerAgentSupervisor::stop()
 {
-    if (!running.load(std::memory_order_acquire))
+    bool was_running = running.exchange(false, std::memory_order_acq_rel);
+    if (!was_running)
     {
         return;
     }
@@ -312,6 +339,7 @@ void RangerAgentSupervisor::stop()
     shutting_down.store(true, std::memory_order_release);
 
     // Close stdin pipe => agent sees EOF and exits
+    // This will cause drain threads to receive EOF once process exits
     if (agent_process)
     {
         try
@@ -354,22 +382,21 @@ void RangerAgentSupervisor::stop()
             }
         }
 
-        if (exited)
+        if (!exited)
         {
-            int exit_code = agent_process->tryWait();
-            LOG_INFO(getLogger("RangerAgentSupervisor"),
-                "Ranger agent exited with code {}", exit_code);
+            LOG_WARNING(getLogger("RangerAgentSupervisor"),
+                "Ranger agent did not exit gracefully, sending SIGKILL");
+            kill(agent_process->getPid(), SIGKILL);
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            agent_process->waitIfProccesTerminated();
         }
-        else
-        {
-            LOG_ERROR(getLogger("RangerAgentSupervisor"),
-                "Ranger agent did not exit, may be orphaned");
-        }
+
+        int exit_code = agent_process->tryWait();
+        LOG_INFO(getLogger("RangerAgentSupervisor"),
+            "Ranger agent exited with code {}", exit_code);
     }
 
-    running.store(false, std::memory_order_release);
-
-    // Join threads
+    // Join threads (agent is dead, so drain threads should exit soon)
     if (watcher_thread.joinable())
     {
         watcher_thread.join();
