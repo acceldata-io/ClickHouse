@@ -2552,9 +2552,12 @@ try
             catch (const Exception & e)
             {
                 LOG_FATAL(log, "Failed to start Ranger agent: {}. ClickHouse cannot start without authorization.", e.message());
-                // Exit with code 100 (fail-stop, no authorization)
-                // Do not throw - that would trigger abort in destructor
-                exit(100);
+
+                // Exit immediately without running destructors (like watcher fail-stop)
+                // Using _exit(100) prevents segfault from background threads accessing
+                // destroyed globals during static destructor cleanup.
+                // Agent process will die when stdin closes (supervised mode).
+                _exit(100);
             }
         }
 
