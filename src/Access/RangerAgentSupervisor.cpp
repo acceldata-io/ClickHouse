@@ -290,7 +290,24 @@ void RangerAgentSupervisor::watchAgent()
     }
     catch (const Exception & e)
     {
-        LOG_ERROR(getLogger("RangerAgentSupervisor"), "Agent watcher thread error: {}", e.message());
+        // Agent monitoring failed (e.g., "terminated by signal")
+        // This is still a fail-stop scenario - cannot continue without working agent
+
+        if (shutting_down.load(std::memory_order_acquire))
+        {
+            // Graceful shutdown in progress, exception is expected
+            LOG_INFO(getLogger("RangerAgentSupervisor"),
+                "Agent watcher caught exception during shutdown: {}", e.message());
+            return;
+        }
+
+        LOG_FATAL(getLogger("RangerAgentSupervisor"),
+            "Ranger agent monitoring failed: {}. "
+            "ClickHouse cannot continue without authorization. Terminating.",
+            e.message());
+
+        // Flush logs and exit without running destructors
+        _exit(100);
     }
 }
 
