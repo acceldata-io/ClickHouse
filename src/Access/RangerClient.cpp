@@ -65,32 +65,64 @@ bool RangerClient::sendRequestImpl(const String & request, String & response_out
             return false;
     }
 
+    String partial_response;
+
     try
     {
-        // Write request
-        WriteBufferFromPocoSocket out(*socket);
-        writeString(request, out);
-        writeChar('\n', out);
-        out.next();
-        out.finalize();
+        // Send request (plain socket write, not WriteBuffer)
+        String request_line = request + "\n";
+        int sent = socket->sendBytes(request_line.data(), request_line.size());
+        if (sent != static_cast<int>(request_line.size()))
+        {
+            throw Exception(ErrorCodes::NETWORK_ERROR,
+                "Failed to send complete request to Ranger agent");
+        }
 
-        // Read response (one line)
-        ReadBufferFromPocoSocket in(*socket);
-        readString(response_out, in, '\n');
+        // Read response line by line using plain recv (no ReadBuffer!)
+        // Stop as soon as we see '\n' - do NOT poll again after that
+        char buffer[4096];
+        response_out.clear();
 
-        // Trim trailing whitespace (\r\n or \n)
-        while (!response_out.empty() && (response_out.back() == '\n' || response_out.back() == '\r'))
+        while (true)
+        {
+            // Check if we already have '\n' in accumulated response
+            if (response_out.find('\n') != String::npos)
+                break;
+
+            // Read more bytes (this will block with socket timeout)
+            int received = socket->receiveBytes(buffer, sizeof(buffer));
+            if (received <= 0)
+            {
+                // Connection closed or error
+                partial_response = response_out;  // Save for logging
+                throw Exception(ErrorCodes::NETWORK_ERROR,
+                    "Agent closed connection before sending complete response");
+            }
+
+            response_out.append(buffer, received);
+        }
+
+        // Trim everything after (and including) '\n'
+        size_t newline_pos = response_out.find('\n');
+        if (newline_pos != String::npos)
+        {
+            response_out.resize(newline_pos);
+        }
+
+        // Also trim '\r' if present
+        while (!response_out.empty() && response_out.back() == '\r')
             response_out.pop_back();
 
         // Close connection after each request (MVP: no keep-alive)
-        // This prevents the reader from waiting for EOF on a persistent connection
         socket.reset();
 
         return true;
     }
     catch (const Poco::Exception & e)
     {
-        LOG_WARNING(getLogger("RangerClient"), "Communication error with Ranger agent: {}", e.displayText());
+        LOG_WARNING(getLogger("RangerClient"),
+            "Communication error with Ranger agent: {} (partial: '{}')",
+            e.displayText(), partial_response.empty() ? response_out : partial_response);
         socket.reset();
         return false;
     }
