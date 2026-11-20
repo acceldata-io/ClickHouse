@@ -30,9 +30,16 @@ RangerAgentSupervisor::~RangerAgentSupervisor()
     {
         stop();
     }
+    catch (const std::exception & e)
+    {
+        // Log but swallow exceptions in destructor
+        LOG_WARNING(getLogger("RangerAgentSupervisor"),
+            "Exception in destructor: {}", e.what());
+    }
     catch (...)
     {
-        // Swallow exceptions in destructor
+        LOG_WARNING(getLogger("RangerAgentSupervisor"),
+            "Unknown exception in destructor");
     }
 }
 
@@ -386,7 +393,12 @@ void RangerAgentSupervisor::stop()
     // Set shutting_down even if not running (for drain threads during startup failure)
     shutting_down.store(true, std::memory_order_release);
 
-    if (!was_running && !stdout_drain_thread.joinable() && !stderr_drain_thread.joinable())
+    // Check if there's anything to clean up
+    bool has_threads = watcher_thread.joinable() ||
+                       stdout_drain_thread.joinable() ||
+                       stderr_drain_thread.joinable();
+
+    if (!was_running && !has_threads && !agent_process)
     {
         // Nothing started, nothing to clean up
         return;
@@ -447,23 +459,51 @@ void RangerAgentSupervisor::stop()
             agent_process->waitIfProccesTerminated();
         }
 
-        int exit_code = agent_process->tryWait();
-        LOG_INFO(getLogger("RangerAgentSupervisor"),
-            "Ranger agent exited with code {}", exit_code);
+        // Try to get exit code, but watcher may have already reaped the child
+        try
+        {
+            int exit_code = agent_process->tryWait();
+            LOG_INFO(getLogger("RangerAgentSupervisor"),
+                "Ranger agent exited with code {}", exit_code);
+        }
+        catch (const Exception & e)
+        {
+            // ECHILD means watcher already reaped - this is fine
+            LOG_DEBUG(getLogger("RangerAgentSupervisor"),
+                "Agent exit code unavailable (already reaped): {}", e.message());
+        }
     }
 
-    // Join threads (agent is dead, so drain threads should exit soon)
+    // Join threads unconditionally with exception safety
+    // Each join in its own try-catch to ensure all threads are joined
     if (watcher_thread.joinable())
     {
-        watcher_thread.join();
+        try { watcher_thread.join(); }
+        catch (const std::exception & e)
+        {
+            LOG_WARNING(getLogger("RangerAgentSupervisor"),
+                "Exception joining watcher thread: {}", e.what());
+        }
     }
+
     if (stdout_drain_thread.joinable())
     {
-        stdout_drain_thread.join();
+        try { stdout_drain_thread.join(); }
+        catch (const std::exception & e)
+        {
+            LOG_WARNING(getLogger("RangerAgentSupervisor"),
+                "Exception joining stdout drain thread: {}", e.what());
+        }
     }
+
     if (stderr_drain_thread.joinable())
     {
-        stderr_drain_thread.join();
+        try { stderr_drain_thread.join(); }
+        catch (const std::exception & e)
+        {
+            LOG_WARNING(getLogger("RangerAgentSupervisor"),
+                "Exception joining stderr drain thread: {}", e.what());
+        }
     }
 
     LOG_INFO(getLogger("RangerAgentSupervisor"), "Ranger agent stopped");
