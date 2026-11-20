@@ -82,40 +82,16 @@ bool RangerClient::sendRequestImpl(const String & request, String & response_out
         while (!response_out.empty() && (response_out.back() == '\n' || response_out.back() == '\r'))
             response_out.pop_back();
 
+        // Close connection after each request (MVP: no keep-alive)
+        // This prevents the reader from waiting for EOF on a persistent connection
+        socket.reset();
+
         return true;
     }
     catch (const Poco::Exception & e)
     {
         LOG_WARNING(getLogger("RangerClient"), "Communication error with Ranger agent: {}", e.displayText());
         socket.reset();
-
-        // Retry once
-        if (connectImpl())
-        {
-            try
-            {
-                WriteBufferFromPocoSocket out(*socket);
-                writeString(request, out);
-                writeChar('\n', out);
-                out.next();
-                out.finalize();
-
-                ReadBufferFromPocoSocket in(*socket);
-                readString(response_out, in, '\n');
-
-                // Trim trailing whitespace (\r\n or \n)
-                while (!response_out.empty() && (response_out.back() == '\n' || response_out.back() == '\r'))
-                    response_out.pop_back();
-
-                return true;
-            }
-            catch (const Poco::Exception & retry_e)
-            {
-                LOG_WARNING(getLogger("RangerClient"), "Retry failed: {}", retry_e.displayText());
-                socket.reset();
-            }
-        }
-
         return false;
     }
 }
@@ -132,9 +108,14 @@ void RangerClient::sanitizeField(const String & field, const String & field_name
 
 void RangerClient::logRequest(const String & request, const String & response, bool allowed)
 {
-    LOG_TRACE(getLogger("RangerClient"),
-        "Ranger request: {} => response: {} ({})",
-        request, response, allowed ? "ALLOW" : "DENY");
+    // Escape newlines for visibility in logs
+    String escaped_response = response;
+    std::replace(escaped_response.begin(), escaped_response.end(), '\n', ' ');
+    std::replace(escaped_response.begin(), escaped_response.end(), '\r', ' ');
+
+    LOG_DEBUG(getLogger("RangerClient"),
+        "Ranger: request=[{}] raw_response=[{}] decision={}",
+        request, escaped_response, allowed ? "ALLOW" : "DENY");
 }
 
 bool RangerClient::checkAccess(
