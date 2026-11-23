@@ -576,9 +576,9 @@ option(CHECK_LARGE_OBJECT_SIZES "Check that there are no large object files afte
 
 add_subdirectory (base)
 add_subdirectory (src)
+add_subdirectory (java)
 add_subdirectory (programs)
 add_subdirectory (utils)
-add_subdirectory (java)
 
 if (FUZZER)
     # Bundle fuzzers target

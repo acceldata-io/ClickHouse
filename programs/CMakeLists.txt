@@ -253,3 +253,8 @@ if (TARGET ch_contrib::protobuf)
         install(FILES ${proto_file} DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/clickhouse/protos/google/protobuf)
     endforeach()
 endif ()
+
+# Ensure Ranger agent jar is built with clickhouse binary
+if (TARGET ranger-agent-jar)
+    add_dependencies(clickhouse ranger-agent-jar)
+endif()
