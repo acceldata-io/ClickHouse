@@ -93,12 +93,17 @@ namespace
         const String & privilege,
         const String & database,
         const String & table,
-        const String & column)
+        const String & column,
+        String * reason_out = nullptr)
     {
         if (!ranger_client || !ranger_client->isReady())
+        {
+            if (reason_out)
+                *reason_out = "agent not ready";
             return false;
+        }
 
-        return ranger_client->checkAccess(user_name, privilege, database, table, column, nullptr);
+        return ranger_client->checkAccess(user_name, privilege, database, table, column, reason_out);
     }
 }
 
@@ -706,18 +711,19 @@ bool ContextAccess::checkAccessImplHelper(const ContextPtr & context, AccessFlag
                     for (const auto & column : element.columns)
                     {
                         String column_str(column);
+                        String reason;
 
                         LOG_DEBUG(::getLogger("ContextAccess"),
-                            "Ranger check: user={}, privilege={}, db={}, table={}, column={}",
+                            "Ranger check: user={}, privilege={}, db={}.{}, column={}",
                             current_user, privilege_str, db_str, table_str, column_str);
 
                         if (!checkRangerSingle(ranger_client, current_user, privilege_str,
-                                              db_str, table_str, column_str))
+                                              db_str, table_str, column_str, &reason))
                         {
                             granted = false;
                             LOG_DEBUG(::getLogger("ContextAccess"),
-                                "Ranger DENY: user={}, privilege={}, db={}, table={}, column={}",
-                                current_user, privilege_str, db_str, table_str, column_str);
+                                "Ranger DENY: user={}, privilege={}, db={}.{}, column={} (Ranger: {})",
+                                current_user, privilege_str, db_str, table_str, column_str, reason);
                             break;
                         }
                     }
