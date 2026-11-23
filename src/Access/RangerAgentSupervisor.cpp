@@ -47,33 +47,67 @@ std::vector<String> RangerAgentSupervisor::buildCommandArgs() const
 {
     std::vector<String> args;
 
-    // First argument: script/jar file path
-    // For Python agent: /path/to/fake_ranger_agent.py
-    // For Java agent: /path/to/agent.jar (or -jar if in jvm_opts)
-    args.push_back(config.jar_path);
+    // Detect agent type: .jar -> Java agent, else -> Python/script agent
+    bool is_jar = config.jar_path.ends_with(".jar");
 
-    // Parse jvm_opts (space-separated)
-    // For fake Python agent: jvm_opts = "--supervised --behavior policy"
-    // For real Java agent: jvm_opts = "-Xmx512m -jar -Dagent.port=0 --supervised"
-    bool has_supervised = false;
-    if (!config.jvm_opts.empty())
+    if (is_jar)
     {
-        std::istringstream iss(config.jvm_opts);
-        String opt;
-        while (iss >> opt)
+        // Java agent: <java> <jvm_opts> -cp <conf_dir>:<jar> <main_class> --supervised
+        // Do NOT use -jar: it ignores -cp, and agent needs conf_dir on classpath
+
+        // 1. Add jvm_opts first (e.g., -Xmx512m -Dagent.port=0)
+        if (!config.jvm_opts.empty())
         {
-            args.push_back(opt);
-            if (opt == "--supervised")
+            std::istringstream iss(config.jvm_opts);
+            String opt;
+            while (iss >> opt)
             {
-                has_supervised = true;
+                args.push_back(opt);
             }
         }
-    }
 
-    // Always ensure --supervised is present for fail-stop behavior
-    if (!has_supervised)
-    {
+        // 2. Add -cp <conf_dir>:<jar>
+        args.push_back("-cp");
+        args.push_back(config.conf_dir + ":" + config.jar_path);
+
+        // 3. Add main class (default: com.acceldata.clickhouse.ranger.AgentMain)
+        String main_class = config.main_class.empty()
+            ? "com.acceldata.clickhouse.ranger.AgentMain"
+            : config.main_class;
+        args.push_back(main_class);
+
+        // 4. Always add --supervised for fail-stop behavior
         args.push_back("--supervised");
+    }
+    else
+    {
+        // Python/script agent: <interpreter> <script> <opts> [--supervised if not present]
+        // For fake agent: python3 fake_ranger_agent.py --supervised --behavior policy
+
+        // 1. Script path
+        args.push_back(config.jar_path);
+
+        // 2. Parse jvm_opts (actually script args for Python)
+        bool has_supervised = false;
+        if (!config.jvm_opts.empty())
+        {
+            std::istringstream iss(config.jvm_opts);
+            String opt;
+            while (iss >> opt)
+            {
+                args.push_back(opt);
+                if (opt == "--supervised")
+                {
+                    has_supervised = true;
+                }
+            }
+        }
+
+        // 3. Ensure --supervised is present
+        if (!has_supervised)
+        {
+            args.push_back("--supervised");
+        }
     }
 
     return args;

@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<configuration>
+  <!-- Ranger Admin URL. -->
+  <property>
+    <name>ranger.plugin.clickhouse.policy.rest.url</name>
+    <value>http://RANGER_ADMIN_HOST:6080</value>
+  </property>
+  <!-- Must match the service name created in Ranger Admin UI (ClickHouse service). -->
+  <property>
+    <name>ranger.plugin.clickhouse.service.name</name>
+    <value>Clickhouse</value>
+  </property>
+  <property>
+    <name>ranger.plugin.clickhouse.policy.source.impl</name>
+    <value>org.apache.ranger.admin.client.RangerAdminRESTClient</value>
+  </property>
+  <!-- Local policy cache: the agent keeps working from this cache if Ranger Admin is down. -->
+  <property>
+    <name>ranger.plugin.clickhouse.policy.cache.dir</name>
+    <value>/tmp/ranger-clickhouse-cache</value>
+  </property>
+  <property>
+    <name>ranger.plugin.clickhouse.policy.pollIntervalMs</name>
+    <value>30000</value>
+  </property>
+  <property>
+    <name>ranger.plugin.clickhouse.policy.rest.client.connection.timeoutMs</name>
+    <value>120000</value>
+  </property>
+  <property>
+    <name>ranger.plugin.clickhouse.policy.rest.client.read.timeoutMs</name>
+    <value>30000</value>
+  </property>
+  <property>
+    <name>ranger.plugin.clickhouse.disable.tag.retriever</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>ranger.plugin.clickhouse.disable.tag.policy.evaluation</name>
+    <value>true</value>
+  </property>
+</configuration>

@@ -338,6 +338,7 @@ void AccessControl::setupFromMainConfig(const Poco::Util::AbstractConfiguration 
         supervisor_config.jar_path = config_.getString("ranger.agent.jar");   // Required
         supervisor_config.conf_dir = config_.getString("ranger.agent.conf_dir"); // Required
         supervisor_config.jvm_opts = config_.getString("ranger.agent.jvm_opts", "");
+        supervisor_config.main_class = config_.getString("ranger.agent.main_class", "com.acceldata.clickhouse.ranger.AgentMain");
         supervisor_config.principal = config_.getString("ranger.agent.principal", "");
         supervisor_config.keytab_path = config_.getString("ranger.agent.keytab", "");
         supervisor_config.start_timeout_ms = config_.getUInt("ranger.agent.start_timeout_ms", 10000);

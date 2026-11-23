@@ -20,10 +20,11 @@ class RangerAgentSupervisor
 public:
     struct Config
     {
-        String java_path;                // Path to java executable (required)
-        String jar_path;                 // Path to agent JAR (required)
+        String java_path;                // Path to java/python executable (required)
+        String jar_path;                 // Path to agent JAR or .py script (required)
         String conf_dir;                 // Agent configuration directory (required)
-        String jvm_opts;                 // JVM options, space-separated (optional)
+        String jvm_opts;                 // JVM options or script args, space-separated (optional)
+        String main_class;               // Java main class (default: com.acceldata.clickhouse.ranger.AgentMain)
         String principal;                // Kerberos principal (optional)
         String keytab_path;              // Kerberos keytab path (optional)
         UInt32 start_timeout_ms = 10000; // Timeout waiting for READY
