@@ -12,12 +12,7 @@
   <properties>
     <maven.compiler.release>11</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <!-- Change this (or use -Dranger.version=...) to build against another Ranger version.
-         Both 2.5.0 (Java 11 deps) and 2.9.0 (Java 17 deps) work with release=17.
-         Build with: mvn package -Dranger.version=2.5.0 (or 2.9.0)
-         Runtime requires: JDK 17+ -->
     <ranger.version>2.5.0.3.3.6.7-SNAPSHOT</ranger.version>
-    <!-- Hadoop version bundled with ODP -->
     <hadoop.version>3.3.6.3.3.6.7-SNAPSHOT</hadoop.version>
   </properties>
 
@@ -32,7 +27,6 @@
       <artifactId>ranger-plugins-audit</artifactId>
       <version>${ranger.version}</version>
     </dependency>
-    <!-- Group resolution (UserGroupInformation), same approach as Kudu's Ranger subprocess -->
     <dependency>
       <groupId>org.apache.hadoop</groupId>
       <artifactId>hadoop-common</artifactId>
