@@ -17,7 +17,7 @@
   <!-- Local policy cache: the agent keeps working from this cache if Ranger Admin is down. -->
   <property>
     <name>ranger.plugin.clickhouse.policy.cache.dir</name>
-    <value>/tmp/ranger-clickhouse-cache</value>
+    <value>/etc/ranger/clickhouse/policycache</value>
   </property>
   <property>
     <name>ranger.plugin.clickhouse.policy.pollIntervalMs</name>
