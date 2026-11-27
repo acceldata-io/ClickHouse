@@ -323,8 +323,8 @@ void AccessControl::setupFromMainConfig(const Poco::Util::AbstractConfiguration 
 
         // Read Ranger configuration
         RangerClient::Config client_config;
-        client_config.host = config_.getString("ranger.host", "127.0.0.1");
-        client_config.port = config_.getUInt("ranger.port", 9099);
+        client_config.host = config_.getString("ranger.agent.host", "127.0.0.1");
+        client_config.port = config_.getUInt("ranger.agent.port", 9099);
         client_config.connect_timeout_ms = config_.getUInt("ranger.connect_timeout_ms", 2000);
         client_config.send_timeout_ms = config_.getUInt("ranger.send_timeout_ms", 2000);
         client_config.receive_timeout_ms = config_.getUInt("ranger.receive_timeout_ms", 2000);
