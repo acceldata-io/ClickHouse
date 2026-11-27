@@ -30,6 +30,9 @@ import org.apache.hadoop.security.UserGroupInformation;
  */
 public class AgentMain {
     public static void main(String[] args) throws Exception {
+        // Print version info
+        printVersionInfo();
+
         boolean supervised = Arrays.asList(args).contains("--supervised");
         boolean daemon = Arrays.asList(args).contains("--daemon");
 
@@ -155,5 +158,20 @@ public class AgentMain {
                 }
             }, 10, 10, TimeUnit.MINUTES);
         }
+    }
+
+    private static void printVersionInfo() {
+        try (java.io.InputStream is = AgentMain.class.getResourceAsStream("/version.properties")) {
+            if (is != null) {
+                java.util.Properties props = new java.util.Properties();
+                props.load(is);
+                String ver = props.getProperty("odp.version");
+                if (ver != null) {
+                    System.out.println("ClickHouse Ranger Agent " + ver);
+                    return;
+                }
+            }
+        } catch (Exception e) {}
+        System.out.println("ClickHouse Ranger Agent (dev)");
     }
 }
