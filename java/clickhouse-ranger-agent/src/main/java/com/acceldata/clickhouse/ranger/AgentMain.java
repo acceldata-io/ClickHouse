@@ -20,15 +20,17 @@ import org.apache.hadoop.security.UserGroupInformation;
  *   java [-Dagent.port=9099] [-Dagent.host=127.0.0.1]
  *        [-Dagent.principal=... -Dagent.keytab=...]          (Kerberos login from keytab; else ticket cache)
  *        -cp conf:target/clickhouse-ranger-agent-0.1.0-SNAPSHOT.jar \
- *        com.acceldata.clickhouse.ranger.AgentMain [--daemon]
+ *        com.acceldata.clickhouse.ranger.AgentMain [--supervised | --daemon]
  *
- *   --daemon : no console, run until killed (use this when started by ClickHouse / nohup).
- *   default  : also reads debug commands from stdin:
+ *   --supervised : run until parent dies (stdin closes) or killed. Used by ClickHouse for fail-stop.
+ *   --daemon     : no console, run until killed (use with nohup).
+ *   default      : also reads debug commands from stdin:
  *       check <user> <rangerAccessType> <db> [table] [column]   (bypasses the privilege mapper)
  *       refresh | quit
  */
 public class AgentMain {
     public static void main(String[] args) throws Exception {
+        boolean supervised = Arrays.asList(args).contains("--supervised");
         boolean daemon = Arrays.asList(args).contains("--daemon");
 
         // 1) Must be first: configure Hadoop security BEFORE any Ranger/Hadoop object is created,
@@ -51,7 +53,27 @@ public class AgentMain {
             authorizer.cleanup();
         }));
         System.out.println("READY ipc=" + host + ":" + server.getPort()
-            + (daemon ? " (daemon)" : " (console: check <user> <accessType> <db> [table] [column] | refresh | quit)"));
+            + (supervised ? " (supervised)" : daemon ? " (daemon)" : " (console: check <user> <accessType> <db> [table] [column] | refresh | quit)"));
+
+        if (supervised) {
+            // Monitor stdin: when it closes (EOF), parent (ClickHouse) died → exit immediately.
+            // This prevents orphan processes when ClickHouse crashes.
+            Thread stdinMonitor = new Thread(() -> {
+                try {
+                    System.in.read();  // Block until EOF
+                    // stdin closed = parent died!
+                    System.err.println("Parent process died (stdin closed), shutting down...");
+                    System.exit(0);
+                } catch (IOException e) {
+                    System.err.println("stdin monitoring failed: " + e + ", shutting down...");
+                    System.exit(0);
+                }
+            }, "stdin-monitor");
+            stdinMonitor.setDaemon(true);
+            stdinMonitor.start();
+            new CountDownLatch(1).await();   // run until killed or stdin closes
+            return;
+        }
 
         if (daemon) {
             new CountDownLatch(1).await();   // run until killed
